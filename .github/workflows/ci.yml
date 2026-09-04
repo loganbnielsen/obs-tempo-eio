@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.4.x
+      - name: Pin obs-eio
+        run: opam pin add obs-eio git+https://github.com/loganbnielsen/obs-eio.git#main --no-action
+      - name: Pin https-eio
+        run: opam pin add https-eio git+https://github.com/loganbnielsen/https-eio.git#main --no-action
+      - name: Install opam dependencies
+        run: opam install . --deps-only --with-test --with-doc
+      - name: Lint opam file
+        run: opam exec -- opam lint obs-tempo-eio.opam
+      - name: Build
+        run: opam exec -- dune build @all
+      - name: Test
+        run: opam exec -- dune runtest
+      - name: Build docs
+        run: opam exec -- dune build @doc

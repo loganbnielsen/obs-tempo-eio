@@ -1,0 +1,5 @@
+(test
+ (name test_tempo)
+ (modules test_tempo)
+ (libraries obs-eio obs_tempo_eio eio eio_main alcotest opentelemetry pbrt uri
+   cohttp-eio http yojson))

@@ -1,0 +1,6 @@
+(library
+ (name obs_tempo_eio)
+ (public_name obs-tempo-eio)
+ (wrapped false)
+ (modules Obs_tempo)
+ (libraries obs-eio eio uri opentelemetry pbrt https-eio))
