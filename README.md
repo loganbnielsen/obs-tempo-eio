@@ -106,6 +106,7 @@ supported ingestion path for Tempo and is what this package uses.
 |---|---|
 | `trace_ctx.trace_id` (`int64 * int64`) | `span.trace_id` (16 bytes, big-endian) |
 | `trace_ctx.span_id` (`int64`) | `span.span_id` (8 bytes, big-endian) |
+| `parent_span_id` (`int64 option`) | `span.parent_span_id` (8 bytes, big-endian) when `Some`; field omitted when `None` (root span) |
 | `name` | `span.name` |
 | `service` | resource attribute `service.name` |
 | `start_ns` / `end_ns` | `span.start_time_unix_nano` / `end_time_unix_nano` (converted to wall-clock — see Timestamps) |
@@ -116,16 +117,13 @@ supported ingestion path for Tempo and is what this package uses.
 `span.kind` is always `Span_kind_internal` — `span_event` carries no information to
 distinguish server/client/producer/consumer spans at this layer.
 
-## No Parent/Child Span Linking
+## Parent/Child Span Linking
 
-`Obs_eio.span_event` carries only the span's own `trace_ctx` (its trace id and its own
-span id) — there is no `parent_span_id` field to read from (see `Obs_eio.with_span`'s doc
-on manual nesting: parent linkage is the caller's job via `?parent`, and only the
-resulting *trace id* is shared, not a parent-span reference). This backend therefore
-never sets OTLP's `parent_span_id` field. Spans sharing a trace id show up together in
-Tempo's trace view but are not connected into a parent/child waterfall — they render as
-siblings, not a nested call tree. This is an `obs-eio` layer limitation, not something
-this package can work around; revisit if `span_event` ever grows a parent field.
+`Obs_eio.span_event.parent_span_id` is `Some parent.span_id` when the span was opened
+with `Obs_eio.with_span ot ?parent`, `None` for a root span. This backend maps it
+directly to OTLP's `span.parent_span_id` (omitted, not zero-filled, when `None`), so
+spans opened with `?parent` render as a proper parent/child waterfall in Tempo's trace
+view instead of unconnected siblings sharing only a trace id.
 
 ## Timestamps
 
@@ -200,7 +198,6 @@ curl -H 'Accept: application/json' http://localhost:3200/api/traces/<trace_id_he
 - Batching / async push — `emit_span` is synchronous; each span close does one HTTP POST
 - `emit_metric` / `declare_metric` — metrics go to `obs-prometheus-eio`, not Tempo; both
   are no-ops here
-- `parent_span_id` — not populated; see "No Parent/Child Span Linking" above
 - OTLP/gRPC transport — HTTP only
 - Span sampling policy — every `with_span` call is exported; sampling is a
   consumer-side concern, not this package's

@@ -75,12 +75,6 @@ let wall_now_ns clock = Int64.of_float (Eio.Time.now clock *. 1e9)
 (* Payload construction                                                 *)
 (* ------------------------------------------------------------------ *)
 
-(* No [parent_span_id]: [Obs_eio.span_event] carries only this span's own
-   [trace_ctx] (trace_id + this span's span_id, per [Obs_eio.with_span]'s
-   doc on manual nesting) — there is no field to recover the parent span id
-   from. Spans emitted by this backend share a trace_id but are not linked
-   into a parent/child waterfall in Tempo's UI unless/until [span_event]
-   itself carries a parent span id. *)
 let resource_spans_of_span_event (e : Obs_eio.span_event) ~close_wall_ns =
   let start_time_unix_nano =
     Int64.sub close_wall_ns (Int64.sub e.end_ns e.start_ns)
@@ -89,6 +83,7 @@ let resource_spans_of_span_event (e : Obs_eio.span_event) ~close_wall_ns =
     Trace.make_span
       ~trace_id:(trace_id_bytes e.trace_ctx.Obs_trace.trace_id)
       ~span_id:(span_id_bytes e.trace_ctx.Obs_trace.span_id)
+      ?parent_span_id:(Option.map span_id_bytes e.parent_span_id)
       ~name:e.name
       ~kind:Trace.Span_kind_internal
       ~start_time_unix_nano

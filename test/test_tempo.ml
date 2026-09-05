@@ -207,6 +207,29 @@ let test_trace_id_and_span_id_round_trip () =
     Alcotest.(check string) "trace_id matches" !captured_trace_id (hex_of_bytes span.trace_id);
     Alcotest.(check string) "span_id matches" !captured_span_id (hex_of_bytes span.span_id))
 
+let test_parent_span_id_maps_to_otlp () =
+  Eio_main.run @@ fun env ->
+  with_mock_tempo_server env (fun ~port ~body_promise ->
+    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
+    let parent = Obs_trace.generate () in
+    Obs_eio.with_span ot ~parent "child" (fun _sp -> ());
+    let body = Eio.Promise.await body_promise in
+    let span = the_span (decode_request body) in
+    Alcotest.(check string) "parent_span_id is the parent context's span_id"
+      (Printf.sprintf "%016Lx" parent.Obs_trace.span_id)
+      (hex_of_bytes span.parent_span_id))
+
+let test_root_span_has_no_parent_span_id () =
+  Eio_main.run @@ fun env ->
+  with_mock_tempo_server env (fun ~port ~body_promise ->
+    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
+    Obs_eio.with_span ot "root" (fun _sp -> ());
+    let body = Eio.Promise.await body_promise in
+    let span = the_span (decode_request body) in
+    Alcotest.(check bool) "no parent_span_id on a root span" true (Bytes.length span.parent_span_id = 0))
+
 let test_create_rejects_invalid_timeout () =
   Eio_main.run @@ fun env ->
   match Obs_tempo.create ~net:env#net ~clock:env#clock ~url:"http://127.0.0.1:4318" ~timeout:0. () with
@@ -351,6 +374,8 @@ let () =
       test_case "span with no logs has no events"       `Quick test_span_with_no_logs_has_no_events;
       test_case "context fields become resource attrs"  `Quick test_context_fields_become_resource_attributes;
       test_case "trace_id/span_id round trip"            `Quick test_trace_id_and_span_id_round_trip;
+      test_case "parent_span_id maps to OTLP"            `Quick test_parent_span_id_maps_to_otlp;
+      test_case "root span has no parent_span_id"        `Quick test_root_span_has_no_parent_span_id;
       test_case "invalid timeout rejected"                `Quick test_create_rejects_invalid_timeout;
       test_case "invalid URL rejected"                    `Quick test_create_rejects_invalid_url;
       test_case "unreachable Tempo reports backend error" `Quick test_tempo_unreachable_reports_backend_error;
