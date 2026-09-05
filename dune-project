@@ -18,7 +18,7 @@ OTLP client: it is the Tempo backend for obs-eio's Obs_eio.backend interface.")
  (source (github loganbnielsen/obs-tempo-eio))
  (depends
   (ocaml (>= 5.4.0))
-  (obs-eio (>= 0.1.1))
+  (obs-eio (>= 0.1.2))
   (eio (>= 1.3))
   (eio_main (and (>= 1.3) :with-test))
   (opentelemetry (>= 0.91.0))
