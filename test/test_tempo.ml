@@ -109,8 +109,9 @@ let hex_of_bytes b =
 
 let test_resource_contains_service_name () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"test-svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     Obs_eio.with_span ot "op" (fun _sp -> ());
     let body = Eio.Promise.await body_promise in
@@ -123,8 +124,9 @@ let test_resource_contains_service_name () =
 
 let test_span_name_and_ok_status () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     Obs_eio.with_span ot "my-span-name" (fun _sp -> ());
     let body = Eio.Promise.await body_promise in
@@ -136,8 +138,9 @@ let test_span_name_and_ok_status () =
 
 let test_span_error_status_carries_message () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     (try
        Obs_eio.with_span ot "failing-op" (fun _sp -> failwith "boom")
@@ -151,8 +154,9 @@ let test_span_error_status_carries_message () =
 
 let test_log_entries_become_span_events () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     Obs_eio.with_span ot "work" (fun sp ->
       Obs_eio.log sp Obs_eio.Info ~fields:[ ("key", "val") ] "my-unique-message");
@@ -169,8 +173,9 @@ let test_log_entries_become_span_events () =
 
 let test_span_with_no_logs_has_no_events () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     Obs_eio.with_span ot "quiet-op" (fun _sp -> ());
     let body = Eio.Promise.await body_promise in
@@ -179,8 +184,9 @@ let test_span_with_no_logs_has_no_events () =
 
 let test_context_fields_become_resource_attributes () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     let ot = Obs_eio.with_context ot [ ("env", "prod"); ("region", "eu-west-1") ] in
     Obs_eio.with_span ot "op" (fun _sp -> ());
@@ -193,8 +199,9 @@ let test_context_fields_become_resource_attributes () =
 
 let test_trace_id_and_span_id_round_trip () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     let captured_trace_id = ref "" and captured_span_id = ref "" in
     Obs_eio.with_span ot "trace-test" (fun sp ->
@@ -209,8 +216,9 @@ let test_trace_id_and_span_id_round_trip () =
 
 let test_parent_span_id_maps_to_otlp () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     let parent = Obs_trace.generate () in
     Obs_eio.with_span ot ~parent "child" (fun _sp -> ());
@@ -222,8 +230,9 @@ let test_parent_span_id_maps_to_otlp () =
 
 let test_root_span_has_no_parent_span_id () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env (fun ~port ~body_promise ->
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
     let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo () in
     Obs_eio.with_span ot "root" (fun _sp -> ());
     let body = Eio.Promise.await body_promise in
@@ -232,48 +241,105 @@ let test_root_span_has_no_parent_span_id () =
 
 let test_create_rejects_invalid_timeout () =
   Eio_main.run @@ fun env ->
-  match Obs_tempo.create ~net:env#net ~clock:env#clock ~url:"http://127.0.0.1:4318" ~timeout:0. () with
+  Eio.Switch.run @@ fun sw ->
+  match Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:"http://127.0.0.1:4318" ~timeout:0. () with
   | _ -> Alcotest.fail "non-positive timeout should raise Invalid_argument"
   | exception Invalid_argument _ -> ()
 
 let test_create_rejects_invalid_url () =
   Eio_main.run @@ fun env ->
-  match Obs_tempo.create ~net:env#net ~clock:env#clock ~url:"unix:/tmp/tempo.sock" () with
+  Eio.Switch.run @@ fun sw ->
+  match Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:"unix:/tmp/tempo.sock" () with
   | _ -> Alcotest.fail "non-http URL should raise Invalid_argument"
   | exception Invalid_argument _ -> ()
 
-let test_tempo_unreachable_reports_backend_error () =
-  Eio_main.run @@ fun env ->
-  let reported = ref None in
-  let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:"http://127.0.0.1:19398" () in
+
+let capture_stderr f =
+  let path = Filename.temp_file "obs-tempo-stderr-" ".log" in
+  let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let saved = Unix.dup Unix.stderr in
+  Unix.dup2 fd Unix.stderr;
+  Unix.close fd;
+  let restore () = flush stderr; Unix.dup2 saved Unix.stderr; Unix.close saved in
+  let result = match f () with v -> restore (); v | exception e -> restore (); raise e in
+  let out = In_channel.with_open_text path In_channel.input_all in
+  Sys.remove path;
+  result, out
+
+(* 0.2: an export failure no longer raises from [emit_span]; it is reported on
+   stderr by the export fiber, with the same detail. *)
+let expect_export_failure_on_stderr ~url ~expect env sw =
+  let reported = ref false in
+  let tempo = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url () in
   let ot =
-    Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo
-      ~on_backend_error:(fun op exn -> reported := Some (op, Printexc.to_string exn))
+    Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock
+      ~backend:(Obs_tempo.backend tempo)
+      ~on_backend_error:(fun _ _ -> reported := true)
       ()
   in
   Obs_eio.with_span ot "op" (fun _sp -> ());
-  match !reported with
-  | Some (Obs_eio.Emit_span { name }, msg) ->
-    Alcotest.(check string) "span name" "op" name;
-    Alcotest.(check bool) "tempo failure reported" true (contains msg "Tempo push")
-  | _ -> Alcotest.fail "expected Tempo push failure to reach on_backend_error"
+  Alcotest.(check bool) "emit does not raise" false !reported;
+  let (), err = capture_stderr (fun () -> Obs_tempo.flush ~timeout:10.0 tempo) in
+  Alcotest.(check bool) ("reported: " ^ err) true (contains err "export failed");
+  Alcotest.(check bool) ("detail: " ^ err) true (contains err expect)
+
+let test_tempo_unreachable_reports_backend_error () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  expect_export_failure_on_stderr ~url:"http://127.0.0.1:19398" ~expect:"Tempo push" env sw
 
 let test_non_2xx_reports_backend_error () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   with_mock_tempo_server env ~status_code:500 (fun ~port ~body_promise:_ ->
-    let reported = ref None in
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:(local_url port) () in
-    let ot =
-      Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock ~backend:tempo
-        ~on_backend_error:(fun op exn -> reported := Some (op, Printexc.to_string exn))
-        ()
-    in
-    Obs_eio.with_span ot "op" (fun _sp -> ());
-    match !reported with
-    | Some (Obs_eio.Emit_span { name }, msg) ->
-      Alcotest.(check string) "span name" "op" name;
-      Alcotest.(check bool) "status reported" true (contains msg "Tempo returned HTTP 500")
-    | _ -> Alcotest.fail "expected non-2xx Tempo response to reach on_backend_error")
+    expect_export_failure_on_stderr ~url:(local_url port) ~expect:"HTTP 500" env sw)
+
+(* A Tempo that accepts connections and never answers. *)
+let test_emit_does_not_wait_for_tempo () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun hole_sw ->
+  let socket =
+    Eio.Net.listen ~backlog:8 ~reuse_addr:true ~sw:hole_sw env#net
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  Eio.Fiber.fork_daemon ~sw:hole_sw (fun () ->
+    let rec loop () = ignore (Eio.Net.accept ~sw:hole_sw socket); loop () in
+    loop ());
+  let port = match Eio.Net.listening_addr socket with `Tcp (_, p) -> p | _ -> 0 in
+  Eio.Switch.run @@ fun sw ->
+  let tempo = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+  let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock
+             ~backend:(Obs_tempo.backend tempo) () in
+  let t0 = Unix.gettimeofday () in
+  for _ = 1 to 5 do
+    Obs_eio.with_span ot "op" (fun _ -> ());
+    Eio.Fiber.yield ()
+  done;
+  let dt = Unix.gettimeofday () -. t0 in
+  Alcotest.(check bool) (Printf.sprintf "5 spans closed in %.2fs" dt) true (dt < 0.5)
+
+let test_overflow_drops_oldest () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tempo = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock
+                ~url:"http://127.0.0.1:19398" ~max_queued:2 () in
+  let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock
+             ~backend:(Obs_tempo.backend tempo) () in
+  for _ = 1 to 5 do Obs_eio.with_span ot "op" (fun _ -> ()) done;
+  Alcotest.(check int) "three oldest dropped" 3 (Obs_tempo.dropped tempo)
+
+let test_flush_exports_everything_queued () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_mock_tempo_server env (fun ~port ~body_promise ->
+    let tempo = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:(local_url port) () in
+    let ot = Obs_eio.create ~service:"svc" ~mono_clock:env#mono_clock
+               ~backend:(Obs_tempo.backend tempo) () in
+    for _ = 1 to 3 do Obs_eio.with_span ot "op" (fun _ -> ()) done;
+    Obs_tempo.flush tempo;
+    Alcotest.(check bool) "flush resolved the export" true (Eio.Promise.is_resolved body_promise);
+    let req = decode_request (Eio.Promise.await body_promise) in
+    Alcotest.(check int) "one request, three spans" 3 (List.length req.resource_spans))
 
 (* ------------------------------------------------------------------ *)
 (* Live Tempo tests (require TEMPO_URL / TEMPO_QUERY_URL env vars)     *)
@@ -339,8 +405,10 @@ let test_live_ingestion () =
     Printf.printf "[skip] TEMPO_URL/TEMPO_QUERY_URL not set — skipping live Tempo ingestion test\n%!"
   | Some tempo_url, Some tempo_query_url ->
     Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
     let unique_service = Printf.sprintf "tempo-e2e-test-%d" (int_of_float (Unix.gettimeofday ())) in
-    let tempo = Obs_tempo.create ~net:env#net ~clock:env#clock ~url:tempo_url () in
+    let exporter = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:tempo_url () in
+    let tempo = Obs_tempo.backend exporter in
     let ot = Obs_eio.create ~service:unique_service ~mono_clock:env#mono_clock ~backend:tempo () in
     let captured_trace_id = ref "" in
     Obs_eio.with_span ot "e2e-span" (fun sp ->
@@ -351,6 +419,7 @@ let test_live_ingestion () =
     let deadline = Unix.gettimeofday () +. 10.0 in
     let found = ref false in
     while (not !found) && Unix.gettimeofday () < deadline do
+      Obs_tempo.flush exporter;
       Eio.Time.sleep env#clock 0.5;
       match tempo_get_trace ~net:env#net ~url:tempo_query_url ~trace_id_hex:!captured_trace_id with
       | 200, body when String.length body > 0 ->
@@ -380,6 +449,9 @@ let () =
       test_case "invalid URL rejected"                    `Quick test_create_rejects_invalid_url;
       test_case "unreachable Tempo reports backend error" `Quick test_tempo_unreachable_reports_backend_error;
       test_case "non-2xx response reports backend error"  `Quick test_non_2xx_reports_backend_error;
+      test_case "emit does not wait for Tempo" `Quick test_emit_does_not_wait_for_tempo;
+      test_case "overflow drops the oldest" `Quick test_overflow_drops_oldest;
+      test_case "flush exports everything queued" `Quick test_flush_exports_everything_queued;
     ];
     "live", [
       test_case "span ingested and queryable" `Slow test_live_ingestion;

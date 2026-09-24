@@ -32,8 +32,12 @@ TEMPO_URL=http://localhost:4318 TEMPO_QUERY_URL=http://localhost:3200 dune test 
 ## Public API
 
 ```ocaml
+type t
+
 val create
-  :  net:_ Eio.Net.t
+  :  sw:Eio.Switch.t
+     (** Owns the background export fiber. *)
+  -> net:_ Eio.Net.t
   -> clock:_ Eio.Time.clock
   -> url:string
      (** Base URL of Tempo's OTLP/HTTP receiver, e.g. "http://localhost:4318".
@@ -42,8 +46,14 @@ val create
      (** Request timeout in seconds. Default: 5.0. *)
   -> ?headers:(string * string) list
      (** Extra HTTP headers, e.g. auth/proxy headers such as X-Scope-OrgID. *)
+  -> ?max_queued:int   (** Spans held while Tempo is slow/down. Default: 10_000. *)
+  -> ?max_batch:int    (** Spans per export request. Default: 500. *)
   -> unit
-  -> Obs_eio.backend
+  -> t
+
+val backend : t -> Obs_eio.backend
+val flush : ?timeout:float -> t -> unit   (* before a short-lived process exits *)
+val dropped : t -> int                     (* spans dropped on queue overflow *)
 ```
 
 No `label_names`/stream-label concept here, unlike `obs-loki-eio`: that's a Loki
@@ -79,12 +89,11 @@ to build one `Trace_service.export_trace_service_request` per span, encode it wi
 packages layered on top of `opentelemetry` (even though the latter is, notably, an
 Eio-native OTLP collector client). Those packages own a background batching
 collector — spans accumulate in a queue and flush on an interval or size threshold — which
-conflicts with `Obs_eio.backend`'s contract: `emit_span` is called synchronously, inline,
-on the calling fiber, and *this* backend (like `obs-loki-eio`) owns the decision to push
-immediately rather than hand off to a second queue. Pulling in a second exporter runtime
-to get one HTTP POST per span would add real dependency weight (`tls-eio`,
-`mirage-crypto-rng`, `ambient-context-eio`, `cohttp-eio`) for a batching behavior this
-package deliberately avoids. Reusing just the wire-format types and doing the HTTP POST
+would duplicate the small queue this backend (like `obs-loki-eio` 0.2) now owns
+itself: `emit_span` enqueues, and a fiber on the caller's switch exports batches. Pulling in a second exporter runtime
+for that would add real dependency weight (`tls-eio`,
+`mirage-crypto-rng`, `ambient-context-eio`, `cohttp-eio`) for behavior a few dozen
+lines here already provide. Reusing just the wire-format types and doing the HTTP POST
 directly through `https-eio` (same as `obs-loki-eio`) gets the reuse benefit without the
 architecture mismatch.
 
@@ -97,7 +106,7 @@ every other OTLP exporter in the ecosystem defaults to, so it is the safer choic
 interop with collectors other than Tempo later.
 
 **Not used:** OTLP/gRPC. No maintained OCaml gRPC + OTLP integration was found that fits
-this package's synchronous, per-span, no-collector-runtime shape; OTLP/HTTP is a fully
+this package's no-collector-runtime shape; OTLP/HTTP is a fully
 supported ingestion path for Tempo and is what this package uses.
 
 ## Span Mapping
@@ -134,18 +143,18 @@ from the monotonic deltas — there is no wall-clock read per log entry.
 
 ## Error Handling
 
-If Tempo is unreachable or returns a non-2xx status, the backend raises an ordinary
-backend exception from `emit_span`. Through `Obs_eio.create`, that exception is caught
-and sent to the handle's `on_backend_error` hook (stderr by default) — a Tempo outage
-does not affect application control flow. Calling the raw backend directly is
-intentionally lower level and will see the exception.
+`emit_span` never touches the network. If an export fails (unreachable, timeout,
+non-2xx), that batch is lost and the failure is printed to stderr by the export fiber
+(at most once every 10 seconds, with the running drop count).
 
 ## Buffering and Backpressure
 
-None. `emit_span` pushes synchronously — one HTTP POST per span close, bounded by the
-configured timeout — and there is no queue or batching, matching `obs-loki-eio`'s
-documented 0.1 behavior for the same reason: a switch-owned queue and flush fiber is
-real lifecycle complexity, not something to add speculatively.
+Asynchronous since 0.2, for the same measured reason as `obs-loki-eio` 0.2: a
+synchronous export put up to the request timeout on every span close (Sol OBS-048).
+`emit_span` enqueues; a fiber on the `sw` given to `create` sends batches of up to
+`max_batch` spans in one OTLP request. The queue holds `max_queued` spans, and on
+overflow the oldest is dropped and counted (`dropped`). Call `flush` before a
+short-lived process exits.
 
 ## Local Development
 
@@ -195,7 +204,6 @@ curl -H 'Accept: application/json' http://localhost:3200/api/traces/<trace_id_he
 
 ## Out of Scope (v1)
 
-- Batching / async push — `emit_span` is synchronous; each span close does one HTTP POST
 - `emit_metric` / `declare_metric` — metrics go to `obs-prometheus-eio`, not Tempo; both
   are no-ops here
 - OTLP/gRPC transport — HTTP only
