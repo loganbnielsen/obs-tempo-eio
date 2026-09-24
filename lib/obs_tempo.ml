@@ -99,7 +99,7 @@ let resource_spans_of_span_event (e : Obs_eio.span_event) ~close_wall_ns =
   Trace.make_resource_spans ~resource ~scope_spans:[ scope_spans ] ()
 
 let encode_request resource_spans =
-  let request = Trace_service.make_export_trace_service_request ~resource_spans:[ resource_spans ] () in
+  let request = Trace_service.make_export_trace_service_request ~resource_spans () in
   let encoder = Pbrt.Encoder.create () in
   Trace_service.encode_pb_export_trace_service_request request encoder;
   Pbrt.Encoder.to_string encoder
@@ -117,15 +117,100 @@ let validate_url url =
   if Uri.host uri = None then
     invalid_arg "Obs_tempo.create: url must include a host"
 
-let create ~net ~clock ~url ?(timeout = 5.0) ?(headers = []) () : Obs_eio.backend =
+(* ------------------------------------------------------------------ *)
+(* Asynchronous export (0.2)                                           *)
+(* ------------------------------------------------------------------ *)
+
+(* Same design as obs-loki-eio 0.2 (its [Obs_loki.create] carries the full
+   rationale): [emit_span] only encodes and enqueues; a background fiber on
+   [sw] exports in batches, so a slow or unreachable Tempo never blocks the
+   fiber that closed a span (Sol OBS-048). The [Stdlib.Mutex] guards queue
+   operations only and is never held across a yield. *)
+type t = {
+  backend : Obs_eio.backend;
+  flush : float -> unit;
+  dropped : int Atomic.t;
+}
+
+let backend t = t.backend
+let dropped t = Atomic.get t.dropped
+let flush ?(timeout = 5.0) t = t.flush timeout
+
+let create ~sw ~net ~clock ~url ?(timeout = 5.0) ?(headers = []) ?(max_queued = 10_000)
+    ?(max_batch = 500) () : t =
   if timeout <= 0. || classify_float timeout = FP_nan then
     invalid_arg "Obs_tempo.create: timeout must be positive";
+  if max_queued < 1 then invalid_arg "Obs_tempo.create: max_queued must be positive";
+  if max_batch < 1 then invalid_arg "Obs_tempo.create: max_batch must be positive";
   validate_url url;
+  let queue = Queue.create () in
+  let queue_mutex = Mutex.create () in
+  let in_flight = Atomic.make 0 in
+  let dropped = Atomic.make 0 in
+  let wake = Eio.Condition.create () in
+  let with_queue f =
+    Mutex.lock queue_mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock queue_mutex) f
+  in
+  let enqueue item =
+    with_queue (fun () ->
+      if Queue.length queue >= max_queued then begin
+        ignore (Queue.take queue);
+        Atomic.incr dropped
+      end;
+      Queue.add item queue);
+    Eio.Condition.broadcast wake
+  in
+  let take_batch () =
+    with_queue (fun () ->
+      let rec go n acc =
+        if n = 0 || Queue.is_empty queue then List.rev acc
+        else go (n - 1) (Queue.take queue :: acc)
+      in
+      let batch = go max_batch [] in
+      if batch <> [] then Atomic.incr in_flight;
+      batch)
+  in
+  let last_report = ref neg_infinity in
+  let report_failure ~spans msg =
+    let now = Eio.Time.now clock in
+    if now -. !last_report >= 10. then begin
+      last_report := now;
+      Printf.eprintf "[obs-tempo] export failed, %d span(s) lost: %s (dropped so far: %d)\n%!"
+        spans msg (Atomic.get dropped)
+    end
+  in
+  let push batch =
+    Fun.protect ~finally:(fun () -> Atomic.decr in_flight) (fun () ->
+      match http_post ~net ~clock ~timeout ~headers ~url ~body:(encode_request batch) with
+      | Ok () -> ()
+      | Error msg -> report_failure ~spans:(List.length batch) msg)
+  in
+  let rec drain () =
+    match take_batch () with
+    | [] ->
+      Eio.Fiber.first
+        (fun () -> Eio.Condition.await_no_mutex wake)
+        (fun () -> Eio.Time.sleep clock 1.0);
+      drain ()
+    | batch -> push batch; drain ()
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () -> drain ());
+  let flush timeout =
+    let deadline = Eio.Time.now clock +. timeout in
+    let rec go () =
+      match take_batch () with
+      | [] ->
+        if Atomic.get in_flight > 0 && Eio.Time.now clock < deadline then begin
+          Eio.Time.sleep clock 0.01; go ()
+        end
+      | batch -> push batch; if Eio.Time.now clock < deadline then go ()
+    in
+    go ()
+  in
   let emit_span (e : Obs_eio.span_event) =
     let close_wall_ns = wall_now_ns clock in
-    let body = encode_request (resource_spans_of_span_event e ~close_wall_ns) in
-    match http_post ~net ~clock ~timeout ~headers ~url ~body with
-    | Ok () -> ()
-    | Error msg -> raise (Failure msg)
+    enqueue (resource_spans_of_span_event e ~close_wall_ns)
   in
-  { Obs_eio.emit_span; emit_metric = (fun _ -> ()); declare_metric = (fun _ -> ()) }
+  { backend = { Obs_eio.emit_span; emit_metric = (fun _ -> ()); declare_metric = (fun _ -> ()) };
+    flush; dropped }

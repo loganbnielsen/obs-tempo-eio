@@ -42,8 +42,18 @@
         Obs_eio.log sp Obs_eio.Info ~fields:[("payment_id", "p_123")] "processing")
     ]} *)
 
+type t
+(** A running Tempo exporter. Export is asynchronous (0.2): closing a span
+    enqueues it, and a background fiber on [sw] exports batches. A slow or
+    unreachable Tempo never blocks the fiber that closed the span. The queue is
+    bounded, so on overflow the oldest span is dropped and counted ({!dropped}).
+    A failed export loses its batch and is reported on stderr (at most once per
+    10 s). Call {!flush} before a short-lived process exits. *)
+
 val create
-  :  net:_ Eio.Net.t
+  :  sw:Eio.Switch.t
+     (** Owns the background export fiber. *)
+  -> net:_ Eio.Net.t
   -> clock:_ Eio.Time.clock
   -> url:string
      (** Base URL of Tempo's OTLP/HTTP receiver, e.g.
@@ -55,5 +65,17 @@ val create
   -> ?headers:(string * string) list
      (** Extra HTTP headers, e.g. auth/proxy headers such as
          [X-Scope-OrgID]. *)
+  -> ?max_queued:int
+     (** Spans held while Tempo is slow or down. Default: [10_000]. *)
+  -> ?max_batch:int
+     (** Spans per export request. Default: [500]. *)
   -> unit
-  -> Obs_eio.backend
+  -> t
+
+val backend : t -> Obs_eio.backend
+
+val flush : ?timeout:float -> t -> unit
+(** Export everything queued and wait for exports in flight, for at most
+    [timeout] seconds (default [5.0]). *)
+
+val dropped : t -> int

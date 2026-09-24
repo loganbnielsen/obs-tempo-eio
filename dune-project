@@ -1,6 +1,6 @@
 (lang dune 3.0)
 (name obs-tempo-eio)
-(version 0.1.0)
+(version 0.2.0)
 (generate_opam_files true)
 
 (package
