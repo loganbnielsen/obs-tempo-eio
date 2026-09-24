@@ -407,7 +407,8 @@ let test_live_ingestion () =
     Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
     let unique_service = Printf.sprintf "tempo-e2e-test-%d" (int_of_float (Unix.gettimeofday ())) in
-    let tempo = Obs_tempo.backend @@ Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:tempo_url () in
+    let exporter = Obs_tempo.create ~sw ~net:env#net ~clock:env#clock ~url:tempo_url () in
+    let tempo = Obs_tempo.backend exporter in
     let ot = Obs_eio.create ~service:unique_service ~mono_clock:env#mono_clock ~backend:tempo () in
     let captured_trace_id = ref "" in
     Obs_eio.with_span ot "e2e-span" (fun sp ->
@@ -418,6 +419,7 @@ let test_live_ingestion () =
     let deadline = Unix.gettimeofday () +. 10.0 in
     let found = ref false in
     while (not !found) && Unix.gettimeofday () < deadline do
+      Obs_tempo.flush exporter;
       Eio.Time.sleep env#clock 0.5;
       match tempo_get_trace ~net:env#net ~url:tempo_query_url ~trace_id_hex:!captured_trace_id with
       | 200, body when String.length body > 0 ->
